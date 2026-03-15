@@ -537,7 +537,8 @@
       <span>TRAINED <span class="val" id="st-trained">0</span></span>
       <span>LOSS <span class="val" id="st-loss">—</span></span>
       <span>CAGE <span class="val" id="st-cage">Baby</span></span>
-      <span>HP <span class="val" id="st-hp">100</span></span>
+      <span>GLYCOGEN <span class="val" id="st-hp">100</span></span>
+      <span>GLUCOSE <span class="val" id="st-glucose">80</span></span>
     </div>
 
   </div><!-- /side-col -->
@@ -557,6 +558,23 @@ const N_SENSORS    = 9;
 const N_CONCEPT    = 16;
 const N_ACTIONS    = 8;
 const STATE_DIM    = N_SENSORS + N_CONCEPT + DRIVE_NAMES.length;
+
+// ── C1 CHEM IDs (for log fidelity) ────────────────────────────────────────
+// Drives:  Hunger=3, Tiredness=6, Sleepiness=7, Fear=10, Boredom=11, NFP=2
+// Signals: Reward=49, Punishment=50, Pain=1, EndorphIn=33
+// Metabol: Starch=57, Glucose=58, Glycogen=59, CO2=62, Glycotoxin=67
+// Learning:Reward=49, Punishment=50, Reinforcement=51
+const CHEM = {
+  HUNGER:3, TIREDNESS:6, SLEEPINESS:7, FEAR:10, BOREDOM:11, NFP:2,
+  REWARD:49, PUNISHMENT:50, REINFORCEMENT:51,
+  PAIN:1, PAIN_INCREASE:17, ENDORPHIN:33,
+  STARCH:57, GLUCOSE:58, GLYCOGEN:59, GLYCOTOXIN:67,
+  FEAR_INCREASE:26, FEAR_DECREASE:42,
+  HUNGER_INCREASE:19, SACCHARIN:35,
+  TIREDNESS_INCREASE:22, TIREDNESS_DECREASE:38,
+  SLEEPINESS_INCREASE:23, SLEEPINESS_DECREASE:39,
+  NFP_DECREASE:34, BOREDOM_DECREASE:43,
+};
 
 // ── SETTINGS ──────────────────────────────────────────────────────────────
 const settings = {
@@ -668,16 +686,31 @@ function makeNorn(name) {
     x: canvas.width  / 2 + (Math.random()-0.5)*100,
     y: canvas.height / 2 + (Math.random()-0.5)*100,
     vx: 0, vy: 0,
-    hp: 100,
-    drives: [20, 0, 0, 0, 20, 20], // Hunger, Tiredness, Sleepiness, Fear, Boredom, NeedPleasure
+
+    // ── C1 CHEMICAL BLOODSTREAM ──────────────────────────────────────────
+    // Drives (0–100 scale). Drive = receptor reads chemical directly.
+    drives: [20, 0, 0, 0, 20, 20], // Hunger, Tiredness, Sleepiness, Fear, Boredom, NFP
+
+    // Metabolic chemicals
+    glycogen: 100, // "life force" — death when hits 0
+    glucose:  80,  // short-term energy
+    starch:   0,   // injected by food, digests to glucose
+
+    // Learning chemicals (C1 Reward/Punishment triad)
+    reward:         0,  // CHEM 49 — produced when drive falls, strengthens last action
+    punishment:     0,  // CHEM 50 — produced when drive rises, weakens last action
+    reinforcement:  0,  // CHEM 51 — produced by decay of both reward+punishment
+
+    // ─────────────────────────────────────────────────────────────────────
     action: 6,
     actionProbs: new Array(N_ACTIONS).fill(1/N_ACTIONS),
     senses: new Array(N_SENSORS).fill(0),
     concept: new Array(N_CONCEPT).fill(0),
     sleeping: false,
-    sleepTimer: 0,
     dead: false,
     epsilon: 0.3,
+    ateTick: false,
+    poisonedTick: false,
   };
 }
 
@@ -839,10 +872,9 @@ function applyAction(action) {
         } else { norn.vx *= 0.5; norn.vy *= 0.5; }
       }
       break;
-    case 5: // Sleep
+    case 5: // Sleep — involuntary or voluntary
       norn.sleeping = true;
       norn.vx = 0; norn.vy = 0;
-      norn.sleepTimer = 30 + Math.floor(norn.drives[1] / 10);
       break;
     case 6: // Wander
       norn.vx += (Math.random()-0.5)*2;
@@ -869,102 +901,152 @@ function physicsStep() {
   norn.y = Math.max(R, Math.min(ch-R, norn.y));
   norn.vx *= 0.9; norn.vy *= 0.9;
 
-  // Sleep handling
+  // ── METABOLIC CHAIN (C1 reactions) ─────────────────────────────────────
+  // Starch → Glucose (digestion, half-life ~64t)
+  const starchDigest = norn.starch * 0.015;
+  norn.starch   = Math.max(0, norn.starch   - starchDigest);
+  norn.glucose  = Math.min(100, norn.glucose + starchDigest);
+
+  // Glucose → Glycogen (energy storage) when glucose is high
+  const storageRate = Math.max(0, norn.glucose - 40) * 0.02;
+  norn.glucose  = Math.max(0, norn.glucose  - storageRate);
+  norn.glycogen = Math.min(100, norn.glycogen + storageRate * 0.5);
+
+  // Glycogen → Glucose (energy release) when glucose is low — raises hunger
+  const mobilRate = Math.max(0, 30 - norn.glucose) * 0.015;
+  norn.glycogen = Math.max(0, norn.glycogen - mobilRate);
+  norn.glucose  = Math.min(100, norn.glucose + mobilRate * 2);
+
+  // Glucose burn by movement (Hexokinase, CO2 production)
+  const speed = Math.hypot(norn.vx, norn.vy);
+  const glucoseBurn = speed * 0.04 + 0.01 * settings.hungerRate; // baseline metabolism
+  norn.glucose = Math.max(0, norn.glucose - glucoseBurn);
+
+  // ── DRIVE TRIAD REACTIONS ───────────────────────────────────────────────
+  // In C1: DriveIncrease → Drive + Punishment; Drive + DriveDecrease → Reward
+  // We simulate this as: drives have natural rise rates (emitters), and
+  // falling drives produce Reward, rising drives produce Punishment.
+
+  const prevDrives = [...norn.drives];
+
+  // HUNGER: rises when glycogen/glucose low (emitter tied to metabolic scarcity)
+  const hungerPressure = Math.max(0, 50 - norn.glucose) * 0.008 * settings.hungerRate;
+  norn.drives[0] = Math.min(100, norn.drives[0] + hungerPressure);
+
+  // TIREDNESS: rises from movement (muscles emit TirednessIncrease)
+  norn.drives[1] = Math.min(100, norn.drives[1] + speed * settings.tiredRate * 0.015);
+
+  // SLEEPINESS: accumulates from time × tiredness (separate from tiredness)
+  norn.drives[2] = Math.min(100, norn.drives[2] + (0.05 + norn.drives[1] * 0.003) * settings.boredRate * 0.3);
+
+  // FEAR: emitted near poison, decays naturally (Fear Decrease has short half-life)
+  norn.drives[3] = Math.max(0, norn.drives[3] - 0.8);
+  for (const p of poisons) {
+    const d = Math.hypot(p.x-norn.x, p.y-norn.y);
+    if (d < 80) norn.drives[3] = Math.min(100, norn.drives[3] + (1 - d/80) * 2.5);
+  }
+
+  // BOREDOM: rises with time, wander/movement reduces it
+  norn.drives[4] = Math.min(100, norn.drives[4] + settings.boredRate * 0.03);
+  if (speed > 1) norn.drives[4] = Math.max(0, norn.drives[4] - speed * 0.15);
+
+  // NEED FOR PLEASURE: slow constant rise, interaction reduces it
+  norn.drives[5] = Math.min(100, norn.drives[5] + 0.025);
+
+  // ── REWARD / PUNISHMENT TRIAD ───────────────────────────────────────────
+  // Reward produced when drives fall. Punishment when they rise.
+  let rewSignal = 0, punSignal = 0;
+  for (let i = 0; i < norn.drives.length; i++) {
+    const delta = norn.drives[i] - prevDrives[i];
+    if (delta < 0) rewSignal  += -delta * 0.4; // drive fell → Reward
+    if (delta > 0) punSignal  +=  delta * 0.4; // drive rose → Punishment
+  }
+  // Reward/Punishment decay rapidly (half-life ~8t in C1)
+  norn.reward      = Math.max(0, (norn.reward      + rewSignal) * 0.75);
+  norn.punishment  = Math.max(0, (norn.punishment  + punSignal) * 0.75);
+  // Reinforcement produced by decay of both
+  norn.reinforcement = Math.min(10, (norn.reward + norn.punishment) * 0.3);
+
+  // ── SLEEP HANDLING ──────────────────────────────────────────────────────
+  // In C1: sleep stimulus gene injects TirednessDecrease + SleepinessDecrease each tick
   if (norn.sleeping) {
-    norn.sleepTimer--;
-    norn.drives[1] = Math.max(0, norn.drives[1] - 3); // Tiredness
-    norn.drives[2] = Math.max(0, norn.drives[2] - 5); // Sleepiness
-    if (norn.sleepTimer <= 0) {
+    norn.drives[1] = Math.max(0, norn.drives[1] - 2.5); // TirednessDecrease
+    norn.drives[2] = Math.max(0, norn.drives[2] - 3.5); // SleepinessDecrease
+    // Wake when BOTH tiredness AND sleepiness drop below threshold
+    if (norn.drives[1] < 15 && norn.drives[2] < 10) {
       norn.sleeping = false;
-      addLog('action', `CAOS: ASLP 0 — norn woke up`);
+      addLog('action', `CAOS: [${norn.name}] ASLP 0 — woke (T:${Math.round(norn.drives[1])} S:${Math.round(norn.drives[2])})`);
     }
+    return; // no movement or eating while asleep
+  }
+
+  // Auto-sleep: involuntary action when sleepiness ≥ threshold (C1 ~85/255 → ~33%)
+  if (norn.drives[2] >= 85) {
+    norn.sleeping = true;
+    norn.vx = 0; norn.vy = 0;
+    addLog('action', `CAOS: [${norn.name}] ASLP 1 — sleepiness threshold (${Math.round(norn.drives[2])})`);
     return;
   }
 
-  // Drive updates
-  const speed = Math.hypot(norn.vx, norn.vy);
-  norn.drives[0] = Math.min(100, norn.drives[0] + settings.hungerRate * 0.05);     // Hunger
-  norn.drives[1] = Math.min(100, norn.drives[1] + speed * settings.tiredRate * 0.02); // Tiredness
-  norn.drives[2] = Math.min(100, norn.drives[2] + (norn.drives[1] / 100) * 0.4);  // Sleepiness
-  norn.drives[4] = Math.min(100, norn.drives[4] + settings.boredRate * 0.04);     // Boredom
-  norn.drives[5] = Math.min(100, norn.drives[5] + 0.03);                           // NeedPleasure
-
-  // Fear decay
-  norn.drives[3] = Math.max(0, norn.drives[3] - 0.5);
-
-  // Near poison → fear rises
-  for (const p of poisons) {
-    const d = Math.hypot(p.x-norn.x, p.y-norn.y);
-    if (d < 60) norn.drives[3] = Math.min(100, norn.drives[3] + (1 - d/60)*2);
-  }
-
-  // Eat food collision
-  let ateTick = false;
+  // ── EATING (Starch + Saccharin injection) ──────────────────────────────
+  // Food injects: Starch (nutrition) + Saccharin (Hunger Decrease = immediate satisfaction)
+  norn.ateTick = false;
   for (let i = foods.length-1; i >= 0; i--) {
     const d = Math.hypot(foods[i].x-norn.x, foods[i].y-norn.y);
     if (d < 14) {
       foods.splice(i, 1);
-      norn.drives[0] = Math.max(0, norn.drives[0] - 40); // Hunger
-      norn.drives[4] = Math.max(0, norn.drives[4] - 20); // Boredom
-      norn.drives[5] = Math.max(0, norn.drives[5] - 15); // NeedPleasure
-      norn.hp = Math.min(100, norn.hp + 5);
+      // Saccharin (HungerDecrease) — immediate satisfaction proportional to hunger
+      const saccharin = Math.min(norn.drives[0], 35);
+      norn.drives[0] = Math.max(0, norn.drives[0] - saccharin);
+      // Starch injection — delayed nutrition via metabolic chain
+      norn.starch = Math.min(100, norn.starch + 60);
+      // Glucose top-up (like a fast-digesting sugar)
+      norn.glucose = Math.min(100, norn.glucose + 20);
+      // Boredom and NFP drop slightly from the interaction
+      norn.drives[4] = Math.max(0, norn.drives[4] - 15); // BoredomDecrease
+      norn.drives[5] = Math.max(0, norn.drives[5] - 10); // NFPDecrease
       foodEaten++;
-      ateTick = true;
-      addLog('reward', `CAOS: STIM WRIT FROM 6 255 — hunger--`);
+      norn.ateTick = true;
+      addLog('reward', `CAOS: [${norn.name}] STIM WRIT FROM ${CHEM.HUNGER} — saccharin+starch (glc:${Math.round(norn.glucose)})`);
     }
   }
-  norn.ateTick = ateTick;
 
-  // Poison collision
-  let poisonedTick = false;
+  // ── POISON COLLISION (Glycotoxin injection) ─────────────────────────────
+  // Poison injects Glycotoxin (destroys glycogen = life force) + Pain + Fear
+  norn.poisonedTick = false;
   for (const p of poisons) {
     const d = Math.hypot(p.x-norn.x, p.y-norn.y);
     if (d < 14) {
-      norn.hp = Math.max(0, norn.hp - 3);
-      norn.drives[0] = Math.min(100, norn.drives[0] + 10);
-      norn.drives[3] = Math.min(100, norn.drives[3] + 30);
+      // Glycotoxin destroys glycogen directly (C1 CHEM 67)
+      norn.glycogen = Math.max(0, norn.glycogen - 8);
+      // Also destroys glucose
+      norn.glucose  = Math.max(0, norn.glucose  - 5);
+      // Pain increase → Pain drive → Punishment signal
+      norn.drives[3] = Math.min(100, norn.drives[3] + 25); // Fear
       poisonTouched++;
-      poisonedTick = true;
-      addLog('punish', `CAOS: CHEM 254 100 — toxin injected`);
+      norn.poisonedTick = true;
+      addLog('punish', `CAOS: [${norn.name}] CHEM ${CHEM.GLYCOTOXIN} — glycogen:${Math.round(norn.glycogen)}`);
     }
   }
-  norn.poisonedTick = poisonedTick;
 
-  // HP decay from hunger
-  if (norn.drives[0] > 90) norn.hp = Math.max(0, norn.hp - 0.3);
-  if (norn.hp <= 0) {
+  // ── GLYCOGEN DEATH (C1: glycogen = 0 → death) ──────────────────────────
+  // Glycogen depletes naturally at a baseline rate (metabolism)
+  norn.glycogen = Math.max(0, norn.glycogen - 0.02);
+  if (norn.glycogen <= 0) {
     norn.dead = true;
-    addLog('death', `CAOS: DEAD — norn has died at tick ${tick}`);
-  }
-
-  // Wander reduces boredom
-  if (speed > 1) norn.drives[4] = Math.max(0, norn.drives[4] - 0.3);
-
-  // Auto-sleep if Sleepiness ≥ 85
-  if (norn.drives[2] >= 85 && !norn.sleeping) {
-    norn.action = 5;
-    applyAction(5);
-    addLog('action', `CAOS: ASLP 1 — sleepiness threshold reached`);
+    addLog('death', `CAOS: [${norn.name}] DEAD — glycogen depleted at tick ${tick}`);
   }
 }
 
 // ── REWARD SIGNAL ──────────────────────────────────────────────────────────
+// In C1: reward/punishment are PRODUCED by drive triad reactions each tick.
+// We use norn.reward and norn.punishment directly as the learning signal.
 function computeReward(prevDrives) {
-  let r = 0;
+  // Primary signal: C1 triad reward/punishment chemicals
+  let r = norn.reward * 0.15 - norn.punishment * 0.15;
 
-  // Drive delta: reward when drives go down, penalise when they rise
-  for (let i = 0; i < DRIVE_NAMES.length; i++) {
-    r -= (norn.drives[i] - prevDrives[i]) * 0.01;
-  }
-
-  // Explicit eating reward — scaled by how hungry the norn was (hungrier = more rewarding)
-  if (norn.ateTick) {
-    const hungerBonus = 0.5 + (prevDrives[0] / 100) * 1.0; // 0.5–1.5
-    r += hungerBonus;
-  }
-
-  // Explicit poison penalty
-  if (norn.poisonedTick) r -= 1.5;
+  // Reinforcement (produced by both reward and punishment decay) modulates magnitude
+  r += norn.reinforcement * 0.05;
 
   // Death penalty
   if (norn.dead) r -= 10;
@@ -1158,13 +1240,13 @@ function drawNorn(n, isSelected) {
     return; // skip bars for non-selected norns
   }
 
-  // HP bar above
+  // HP bar above (glycogen = life force in C1)
   const barW = 40, barH = 5;
   const bx = x - barW/2, by = y - r - 18;
   ctx.fillStyle = '#0d1520';
   ctx.fillRect(bx, by, barW, barH);
-  ctx.fillStyle = n.hp > 50 ? '#7fff00' : n.hp > 25 ? '#ffa502' : '#ff4757';
-  ctx.fillRect(bx, by, barW * (n.hp/100), barH);
+  ctx.fillStyle = n.glycogen > 50 ? '#7fff00' : n.glycogen > 25 ? '#ffa502' : '#ff4757';
+  ctx.fillRect(bx, by, barW * (n.glycogen/100), barH);
   ctx.strokeStyle = '#1e2a38'; ctx.lineWidth = 0.5;
   ctx.strokeRect(bx, by, barW, barH);
 
@@ -1309,7 +1391,9 @@ function updateUI() {
   document.getElementById('st-trained').textContent = trainCount;
   document.getElementById('st-loss').textContent    = lastLoss !== null ? lastLoss.toFixed(4) : '—';
   document.getElementById('st-cage').textContent    = AGES[cage];
-  document.getElementById('st-hp').textContent      = Math.round(norn.hp);
+  document.getElementById('st-hp').textContent      = Math.round(getNorn().glycogen);
+  const glc = document.getElementById('st-glucose');
+  if (glc) glc.textContent = Math.round(getNorn().glucose);
 }
 
 // ── MAIN LOOP ──────────────────────────────────────────────────────────────
@@ -1440,20 +1524,33 @@ document.getElementById('btn-reset').onclick = () => {
   updateUI();
 };
 
-// Reward / Punish
+// Reward / Punish — C1: tickle injects NFPDecrease+Endorphin+Reward; slap injects PainIncrease+FearIncrease+Punishment
 document.getElementById('btn-reward').onclick = async () => {
   if (teachTarget < 0) { addLog('punish','TEACH: No target action selected.'); return; }
+  const n = getNorn();
+  if (!n) return;
+  // C1 tickle: inject Reward, NFP Decrease, Endorphin (drives NFP + fear down, reward signal up)
+  n.reward       = Math.min(100, n.reward + 30);         // CHEM 49
+  n.drives[5]    = Math.max(0, n.drives[5] - 25);        // NFP Decrease (CHEM 34)
+  n.drives[3]    = Math.max(0, n.drives[3] - 10);        // Endorphin / Fear Decrease (CHEM 33)
+  n.reinforcement = Math.min(10, n.reinforcement + 3);    // CHEM 51
   const s = getStateVec();
-  remember(s, teachTarget, +2, s, false);
+  remember(s, teachTarget, +2.5, s, false);
   await trainBatch();
-  addLog('reward', `TEACH: REWARD → ${ACTION_NAMES[teachTarget]} (training injected)`);
+  addLog('reward', `TEACH: STIM ${CHEM.REWARD} — tickle → ${ACTION_NAMES[teachTarget]}`);
 };
 document.getElementById('btn-punish').onclick = async () => {
   if (teachTarget < 0) { addLog('punish','TEACH: No target action selected.'); return; }
+  const n = getNorn();
+  if (!n) return;
+  // C1 slap: inject Punishment, PainIncrease, FearIncrease
+  n.punishment   = Math.min(100, n.punishment + 30);     // CHEM 50
+  n.drives[3]    = Math.min(100, n.drives[3] + 20);      // Fear Increase (CHEM 26)
+  n.reinforcement = Math.min(10, n.reinforcement + 3);    // CHEM 51
   const s = getStateVec();
-  remember(s, teachTarget, -2, s, false);
+  remember(s, teachTarget, -2.5, s, false);
   await trainBatch();
-  addLog('punish', `TEACH: PUNISH → ${ACTION_NAMES[teachTarget]} (training injected)`);
+  addLog('punish', `TEACH: STIM ${CHEM.PUNISHMENT} — slap → ${ACTION_NAMES[teachTarget]}`);
 };
 
 // Settings
