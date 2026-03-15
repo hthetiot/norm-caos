@@ -1017,17 +1017,17 @@ function physicsStep() {
   norn.poisonedTick = false;
   for (const p of poisons) {
     const d = Math.hypot(p.x-norn.x, p.y-norn.y);
-    if (d < 14) {
+    if (d < 10) {
       // Glycotoxin destroys glycogen directly (C1 CHEM 67)
-      norn.glycogen = Math.max(0, norn.glycogen - 8);
+      norn.glycogen = Math.max(0, norn.glycogen - 1);
       // Also destroys glucose
-      norn.glucose  = Math.max(0, norn.glucose  - 5);
+      norn.glucose  = Math.max(0, norn.glucose  - 2);
       // Fear Increase (CHEM 26) — proximity alarm
-      norn.drives[3] = Math.min(100, norn.drives[3] + 25);
+      norn.drives[3] = Math.min(100, norn.drives[3] + 10);
       // Pain Increase (CHEM 17) → directly injects Punishment (CHEM 50)
       // This is the C1 triad: PainIncrease → Pain + Punishment
       // Punishment weakens the neural connections that led to this action
-      norn.punishment = Math.min(100, norn.punishment + 40);
+      norn.punishment = Math.min(100, norn.punishment + 15);
       norn.reinforcement = Math.min(10, norn.reinforcement + 4);
       poisonTouched++;
       norn.poisonedTick = true;
@@ -1397,9 +1397,9 @@ function updateUI() {
   document.getElementById('st-trained').textContent = trainCount;
   document.getElementById('st-loss').textContent    = lastLoss !== null ? lastLoss.toFixed(4) : '—';
   document.getElementById('st-cage').textContent    = AGES[cage];
-  document.getElementById('st-hp').textContent      = Math.round(getNorn().glycogen);
+  document.getElementById('st-hp').textContent      = Math.round(n.glycogen);
   const glc = document.getElementById('st-glucose');
-  if (glc) glc.textContent = Math.round(getNorn().glucose);
+  if (glc) glc.textContent = Math.round(n.glucose);
 }
 
 // ── MAIN LOOP ──────────────────────────────────────────────────────────────
@@ -1503,7 +1503,7 @@ canvas.addEventListener('click', (e) => {
   // Click on a norn to select it
   for (let i = 0; i < norns.length; i++) {
     const n = norns[i];
-    if (Math.hypot(n.x - x, n.y - y) < 16) {
+    if (Math.hypot(n.x - x, n.y - y) < 20) {
       selectedNornIdx = i;
       refreshCreatureSelect();
       draw();
@@ -1626,14 +1626,20 @@ document.getElementById('btn-creature-add').onclick = () => {
 };
 
 document.getElementById('btn-creature-remove').onclick = () => {
-  if (norns.length <= 1) { addLog('punish', 'REMOVE: cannot remove last creature'); return; }
+  if (norns.length === 0) return;
   const name = getNorn().name;
   norns.splice(selectedNornIdx, 1);
+  // If world is now empty, spawn a replacement so we never have 0 norns
+  if (norns.length === 0) {
+    norns.push(makeNorn('Eve'));
+    addLog('event', `KILL: TARG — "${name}" removed — world empty, new Norn spawned`);
+  } else {
+    addLog('event', `KILL: TARG — "${name}" removed`);
+  }
   selectedNornIdx = Math.max(0, Math.min(selectedNornIdx, norns.length - 1));
   refreshCreatureSelect();
   draw();
   updateUI();
-  addLog('event', `KILL: TARG — "${name}" removed`);
 };
 
 document.getElementById('btn-creature-export').onclick = () => {
