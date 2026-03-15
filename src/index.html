@@ -1,0 +1,1601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CAOS Neural Demo — Creatures I</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap');
+
+  :root {
+    --bg: #0a0c0f;
+    --panel: #10141a;
+    --border: #1e2a38;
+    --accent: #00e5ff;
+    --accent2: #7fff00;
+    --accent3: #ff4757;
+    --accent4: #ffa502;
+    --text: #c8d8e8;
+    --muted: #4a6070;
+    --font-mono: 'Share Tech Mono', monospace;
+    --font-head: 'Orbitron', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── TOP BAR ── */
+  #topbar {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    flex-shrink: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  #topbar .logo {
+    font-family: var(--font-head);
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 2px;
+    margin-right: 12px;
+    white-space: nowrap;
+  }
+  .tb-btn {
+    background: #161d27;
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: all .15s;
+    white-space: nowrap;
+  }
+  .tb-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .tb-btn.active { background: #002a30; border-color: var(--accent); color: var(--accent); }
+  .tb-btn.danger { border-color: #3a1520; }
+  .tb-btn.danger:hover { border-color: var(--accent3); color: var(--accent3); }
+  .tb-btn.success:hover { border-color: var(--accent2); color: var(--accent2); }
+  #topbar .sep { width: 1px; height: 24px; background: var(--border); margin: 0 4px; }
+
+  /* ── BUTTON GROUP ── */
+  .btn-group { display: flex; }
+  .btn-group .tb-btn { border-radius: 0; }
+  .btn-group .tb-btn:first-child { border-right: none; }
+  .btn-group .tb-btn.active.success { background: #0d2010; border-color: var(--accent2); color: var(--accent2); }
+  .btn-group .tb-btn.active.danger  { background: #200d0d; border-color: var(--accent3); color: var(--accent3); }
+
+  /* ── MAIN ── */
+  #main {
+    display: flex;
+    flex: 1;
+    min-height: 0; /* critical: allows children to shrink below content size */
+    overflow: hidden;
+  }
+
+  /* ── WORLD ── */
+  #world-col {
+    flex: 0 0 70%;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    min-height: 0;
+  }
+  #world-canvas {
+    flex: 1;
+    display: block;
+    background: #060810;
+    image-rendering: pixelated;
+    min-height: 0;
+    width: 100%;
+  }
+
+  /* ── SIDE PANEL ── */
+  #side-col {
+    flex: 0 0 30%;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* ── STATUS BAR ── */
+  #statusbar {
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    padding: 5px 12px;
+    display: flex;
+    gap: 16px;
+    font-size: 11px;
+    color: var(--muted);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    overflow: hidden;
+    order: 10; /* sits at bottom of side-col on desktop */
+  }
+  #statusbar span { white-space: nowrap; }
+  #statusbar .val { color: var(--accent); }
+
+  /* ── MOBILE ── */
+  @media (max-width: 700px) {
+    html, body { height: 100%; overflow: hidden; }
+    #topbar { flex-wrap: wrap; gap: 5px; padding: 6px 8px; }
+    #topbar .logo { font-size: 10px; width: 100%; margin: 0 0 2px; }
+    #topbar .sep { display: none; }
+    #main { flex-direction: column; }
+    #world-col {
+      flex: 0 0 auto;
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
+    #world-canvas { max-height: 50vh; width: 100%; }
+    #statusbar {
+      order: 0;  /* above tabs (#tabs has no order = 0, so we use -1 to beat it) */
+      border-top: none;
+      border-bottom: 1px solid var(--border);
+      gap: 8px 14px;
+      font-size: 10px;
+      order: -1;
+    }
+    #side-col { flex: 1; min-height: 0; }
+  }
+
+  /* ── TABS ── */
+  #tabs {
+    display: flex;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    order: 1;
+  }
+  .tab {
+    padding: 6px 10px;
+    cursor: pointer;
+    font-family: var(--font-head);
+    font-size: 8px;
+    letter-spacing: 1px;
+    color: var(--muted);
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    transition: all .15s;
+    white-space: nowrap;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom: 2px solid var(--accent); background: #0d1520; }
+
+  #tab-content {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 10px;
+    order: 2;
+    min-height: 0;
+  }
+  #tab-content::-webkit-scrollbar { width: 4px; }
+  #tab-content::-webkit-scrollbar-thumb { background: var(--border); }
+
+  .tab-pane { display: none; }
+  .tab-pane.active { display: block; }
+
+  /* ── DRIVE BARS ── */
+  .drive-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  .drive-item { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .drive-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .drive-track {
+    width: 28px;
+    height: 90px;
+    background: #0d1520;
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+  .drive-fill {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    background: var(--accent);
+    transition: height .3s;
+  }
+  .drive-val { font-size: 10px; color: var(--text); }
+
+  /* ── SECTION HEADING ── */
+  .sec-head {
+    font-family: var(--font-head);
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 4px;
+    margin-bottom: 8px;
+    margin-top: 12px;
+  }
+  .sec-head:first-child { margin-top: 0; }
+
+  /* ── SENSE ROWS ── */
+  .sense-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+  }
+  .sense-name { color: var(--muted); font-size: 11px; }
+  .sense-bar-wrap { flex: 1; margin: 0 8px; height: 6px; background: #0d1520; border: 1px solid var(--border); }
+  .sense-bar { height: 100%; background: var(--accent2); transition: width .2s; }
+  .sense-val { color: var(--text); font-size: 11px; min-width: 28px; text-align: right; }
+
+  /* ── ACTION CARDS ── */
+  .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .action-card {
+    background: #0d1520;
+    border: 1px solid var(--border);
+    padding: 8px;
+    cursor: pointer;
+    transition: all .15s;
+    position: relative;
+    overflow: hidden;
+  }
+  .action-card:hover { border-color: var(--accent); }
+  .action-card.active-action { border-color: var(--accent2); background: #0d1f0d; }
+  .action-card.selected-teach { border-color: var(--accent4); background: #1a1200; }
+  .action-name { font-size: 11px; color: var(--text); margin-bottom: 4px; }
+  .action-prob-bar { height: 4px; background: var(--border); margin-bottom: 2px; }
+  .action-prob-fill { height: 100%; background: var(--accent); transition: width .3s; }
+  .action-prob-val { font-size: 10px; color: var(--muted); }
+  .action-card.active-action .action-prob-fill { background: var(--accent2); }
+
+  /* ── TEACH CONTROLS ── */
+  #teach-controls {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .teach-btn {
+    flex: 1;
+    padding: 8px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    border: none;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  #btn-reward { background: #0d2010; color: var(--accent2); border: 1px solid var(--accent2); }
+  #btn-reward:hover { background: #1a3a18; }
+  #btn-punish { background: #200d0d; color: var(--accent3); border: 1px solid var(--accent3); }
+  #btn-punish:hover { background: #3a1818; }
+
+  /* ── SETTINGS ── */
+  .setting-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .setting-label { color: var(--muted); font-size: 11px; }
+  .setting-row input[type="range"] {
+    width: 110px;
+    accent-color: var(--accent);
+  }
+  .setting-row input[type="number"] {
+    width: 60px;
+    background: #0d1520;
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--font-mono);
+    padding: 2px 4px;
+    font-size: 11px;
+  }
+  .setting-val { color: var(--accent); font-size: 11px; min-width: 30px; text-align: right; }
+
+  /* ── LOG ── */
+  #log-output {
+    font-size: 11px;
+    line-height: 1.7;
+    color: var(--muted);
+    height: 100%;
+  }
+  #log-output .log-tick { color: var(--accent); }
+  #log-output .log-action { color: var(--text); }
+  #log-output .log-reward { color: var(--accent2); }
+  #log-output .log-punish { color: var(--accent3); }
+  #log-output .log-event { color: var(--accent4); }
+  #log-output .log-death { color: var(--accent3); font-weight: bold; }
+
+  /* ── CONCEPT GRID ── */
+  .concept-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 3px;
+    margin-top: 6px;
+  }
+  .concept-cell {
+    height: 20px;
+    background: #0d1520;
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+  .concept-fill {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    background: var(--accent);
+    transition: height .2s;
+  }
+
+  #world-canvas { cursor: default; }
+  #world-canvas.place-mode { cursor: crosshair; }
+
+  .setting-row input[type="checkbox"] {
+    width: 16px; height: 16px;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+
+  /* ── SCROLLBAR ── */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); }
+</style>
+</head>
+<body>
+
+<!-- TOP TOOLBAR -->
+<div id="topbar">
+  <div class="logo">⬡ CAOS/NEURAL v1.0</div>
+  <div class="sep"></div>
+  <button class="tb-btn active" id="btn-play">⏸ PAUSE</button>
+  <button class="tb-btn" id="btn-step">▶ STEP</button>
+  <button class="tb-btn" id="btn-stepback">◀ BACK</button>
+  <button class="tb-btn" id="btn-teach-mode">✎ TEACH</button>
+  <div class="sep"></div>
+  <div class="btn-group">
+    <button class="tb-btn success" id="btn-add-food">+ FOOD</button>
+    <button class="tb-btn success" id="btn-place-food">✎</button>
+  </div>
+  <div class="btn-group">
+    <button class="tb-btn danger" id="btn-add-poison">+ POISON</button>
+    <button class="tb-btn danger" id="btn-place-poison">✎</button>
+  </div>
+  <div class="sep"></div>
+  <button class="tb-btn" id="btn-train">⚙ TRAIN</button>
+  <button class="tb-btn danger" id="btn-reset">↺ RESET</button>
+</div>
+
+<!-- MAIN -->
+<div id="main">
+  <!-- WORLD CANVAS -->
+  <div id="world-col">
+    <canvas id="world-canvas"></canvas>
+  </div>
+
+  <!-- SIDE PANEL -->
+  <div id="side-col">
+    <div id="tabs">
+      <div class="tab active" data-tab="drives">DRIVES</div>
+      <div class="tab" data-tab="sense">SENSE</div>
+      <div class="tab" data-tab="actions">ACTIONS</div>
+      <div class="tab" data-tab="teach">TEACH</div>
+      <div class="tab" data-tab="settings">SETTINGS</div>
+      <div class="tab" data-tab="log">LOG</div>
+    </div>
+
+    <div id="tab-content">
+
+      <!-- DRIVES -->
+      <div class="tab-pane active" id="pane-drives">
+        <div class="sec-head">BIOLOGICAL DRIVES</div>
+        <div class="drive-grid" id="drive-grid"></div>
+      </div>
+
+      <!-- SENSE -->
+      <div class="tab-pane" id="pane-sense">
+        <div class="sec-head">SENSOR INPUTS</div>
+        <div id="sense-rows"></div>
+        <div class="sec-head">CONCEPT LOBE ACTIVATIONS</div>
+        <div class="concept-grid" id="concept-grid"></div>
+      </div>
+
+      <!-- ACTIONS -->
+      <div class="tab-pane" id="pane-actions">
+        <div class="sec-head">DECISION LOBE — ACTION PROBABILITIES</div>
+        <div class="action-grid" id="action-grid"></div>
+      </div>
+
+      <!-- TEACH -->
+      <div class="tab-pane" id="pane-teach">
+        <div class="sec-head">TEACH MODE — SELECT TARGET ACTION</div>
+        <div class="action-grid" id="teach-grid"></div>
+        <div id="teach-controls">
+          <button class="teach-btn" id="btn-reward">✓ REWARD</button>
+          <button class="teach-btn" id="btn-punish">✗ PUNISH</button>
+        </div>
+        <div style="margin-top:8px; color: var(--muted); font-size:10px; line-height:1.6">
+          1. Enable TEACH mode in toolbar<br>
+          2. Use STEP to advance one tick at a time<br>
+          3. Click an action card to pin it as target<br>
+          4. Press REWARD or PUNISH<br>
+          5. Press TRAIN to run backprop
+        </div>
+      </div>
+
+      <!-- SETTINGS -->
+      <div class="tab-pane" id="pane-settings">
+        <div class="sec-head">SIMULATION</div>
+        <div class="setting-row">
+          <span class="setting-label">Speed (ticks/s)</span>
+          <input type="range" id="set-speed" min="1" max="60" value="10">
+          <span class="setting-val" id="val-speed">10</span>
+        </div>
+        <div class="sec-head">OBJECTS</div>
+        <div class="setting-row">
+          <span class="setting-label">Auto-spawn food</span>
+          <input type="checkbox" id="set-autospawn-food" checked>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Food spawn rate</span>
+          <input type="range" id="set-food-rate" min="10" max="300" value="80">
+          <span class="setting-val" id="val-food-rate">every 80t</span>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Auto-spawn poison</span>
+          <input type="checkbox" id="set-autospawn-poison" checked>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Poison spawn rate</span>
+          <input type="range" id="set-poison-rate" min="10" max="300" value="200">
+          <span class="setting-val" id="val-poison-rate">every 200t</span>
+        </div>
+        <div class="sec-head">DRIVE RISE RATES</div>
+        <div class="setting-row">
+          <span class="setting-label">Hunger rate</span>
+          <input type="range" id="set-hunger-rate" min="1" max="20" value="5">
+          <span class="setting-val" id="val-hunger-rate">5</span>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Tiredness rate</span>
+          <input type="range" id="set-tired-rate" min="1" max="20" value="3">
+          <span class="setting-val" id="val-tired-rate">3</span>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Boredom rate</span>
+          <input type="range" id="set-bored-rate" min="1" max="20" value="4">
+          <span class="setting-val" id="val-bored-rate">4</span>
+        </div>
+        <div class="sec-head">LEARNING</div>
+        <div class="setting-row">
+          <span class="setting-label">Learning rate</span>
+          <input type="range" id="set-lr" min="1" max="50" value="5">
+          <span class="setting-val" id="val-lr">0.005</span>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Memory size</span>
+          <input type="range" id="set-mem" min="10" max="200" value="100">
+          <span class="setting-val" id="val-mem">100</span>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Discount γ</span>
+          <input type="range" id="set-gamma" min="1" max="99" value="90">
+          <span class="setting-val" id="val-gamma">0.90</span>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Auto-train every N ticks</span>
+          <input type="range" id="set-autotrain" min="0" max="200" value="0">
+          <span class="setting-val" id="val-autotrain">OFF</span>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Pause when TEACH on</span>
+          <input type="checkbox" id="set-pause-on-teach" checked>
+        </div>
+        <div class="sec-head">CREATURES</div>
+        <div class="setting-row" style="gap:6px;flex-wrap:wrap">
+          <span class="setting-label" style="width:100%">Selected creature</span>
+          <select id="set-creature-select" style="flex:1;background:#0d1520;border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:3px 6px;"></select>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
+          <button class="tb-btn" id="btn-creature-add" style="flex:1">+ ADD</button>
+          <button class="tb-btn" id="btn-creature-import" style="flex:1">↑ IMPORT</button>
+          <button class="tb-btn danger" id="btn-creature-remove" style="flex:1">✕ REMOVE</button>
+          <button class="tb-btn" id="btn-creature-export" style="flex:1">↓ EXPORT</button>
+        </div>
+        <input type="file" id="creature-import-file" accept=".json" style="display:none">
+      </div>
+
+      <!-- LOG -->
+      <div class="tab-pane" id="pane-log">
+        <div class="sec-head">CAOS COMMAND LOG</div>
+        <div id="log-output"></div>
+      </div>
+
+    </div><!-- /tab-content -->
+
+    <!-- STATUS BAR inside side-col: order 10 on desktop (bottom), order -1 on mobile (top) -->
+    <div id="statusbar">
+      <span>TICK <span class="val" id="st-tick">0</span></span>
+      <span>EATEN <span class="val" id="st-eaten">0</span></span>
+      <span>POISONED <span class="val" id="st-poisoned">0</span></span>
+      <span>TRAINED <span class="val" id="st-trained">0</span></span>
+      <span>LOSS <span class="val" id="st-loss">—</span></span>
+      <span>CAGE <span class="val" id="st-cage">Baby</span></span>
+      <span>HP <span class="val" id="st-hp">100</span></span>
+    </div>
+
+  </div><!-- /side-col -->
+</div><!-- /main -->
+
+<script>
+'use strict';
+
+// ── CONSTANTS ──────────────────────────────────────────────────────────────
+const W = 0, H = 0; // set dynamically
+const DRIVE_NAMES = ['Hunger','Tiredness','Sleepiness','Fear','Boredom','Need Pleasure'];
+const DRIVE_COLORS = ['#ff4757','#a855f7','#00bfff','#ffa502','#f7df1e','#ff6b9d'];
+const ACTION_NAMES = ['Move Left','Move Right','Move Up','Move Down','Eat','Sleep','Wander','Say Need'];
+const SENSE_NAMES  = ['Food dist','Food dir','Poison dist','Poison dir','Wall L','Wall R','Wall T','Wall B','Touching'];
+const AGES         = ['Baby','Child','Youth','Adult','Old','Ancient','Ancient+'];
+const N_SENSORS    = 9;
+const N_CONCEPT    = 16;
+const N_ACTIONS    = 8;
+const STATE_DIM    = N_SENSORS + N_CONCEPT + DRIVE_NAMES.length;
+
+// ── SETTINGS ──────────────────────────────────────────────────────────────
+const settings = {
+  speed: 10,
+  foodRate: 80,
+  poisonRate: 200,
+  autoSpawnFood: true,
+  autoSpawnPoison: true,
+  pauseOnTeach: true,
+  hungerRate: 5,
+  tiredRate: 3,
+  boredRate: 4,
+  lr: 0.005,
+  memSize: 100,
+  gamma: 0.90,
+  autoTrain: 0,
+};
+
+// ── CANVAS SETUP ──────────────────────────────────────────────────────────
+const canvas = document.getElementById('world-canvas');
+const ctx = canvas.getContext('2d');
+
+function resizeCanvas() {
+  const rect = canvas.getBoundingClientRect();
+  canvas.width  = Math.round(rect.width);
+  canvas.height = Math.round(rect.height);
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+// ── NEURAL NETWORK ─────────────────────────────────────────────────────────
+let model, optimizer;
+function buildModel() {
+  model = tf.sequential();
+  model.add(tf.layers.dense({ inputShape: [STATE_DIM], units: 32, activation: 'relu' }));
+  model.add(tf.layers.dense({ units: 24, activation: 'relu' }));
+  model.add(tf.layers.dense({ units: N_ACTIONS, activation: 'linear' }));
+  optimizer = tf.train.adam(settings.lr);
+  return model;
+}
+buildModel();
+
+// ── EXPERIENCE REPLAY ─────────────────────────────────────────────────────
+const memory = [];
+function remember(state, action, reward, nextState, done) {
+  if (memory.length >= settings.memSize) memory.shift();
+  memory.push({ state, action, reward, nextState, done });
+}
+
+let lastLoss = null;
+let trainCount = 0;
+
+async function trainBatch() {
+  if (memory.length < 8) return;
+  const batch = [];
+  for (let i = 0; i < Math.min(32, memory.length); i++) {
+    batch.push(memory[Math.floor(Math.random() * memory.length)]);
+  }
+  const states     = tf.tensor2d(batch.map(b => b.state));
+  const nextStates = tf.tensor2d(batch.map(b => b.nextState));
+  const currentQs  = model.predict(states);
+  const nextQs     = model.predict(nextStates);
+  const currentArr = await currentQs.array();
+  const nextArr    = await nextQs.array();
+
+  const lossVal = await tf.tidy(() => {
+    const targets = currentArr.map((q, i) => {
+      const b = batch[i];
+      const target = [...q];
+      const futureReward = b.done ? 0 : Math.max(...nextArr[i]);
+      target[b.action] = b.reward + settings.gamma * futureReward;
+      return target;
+    });
+    const targetT = tf.tensor2d(targets);
+    const statesT = tf.tensor2d(batch.map(b => b.state));
+    let lossResult = 0;
+    optimizer.minimize(() => {
+      const pred = model.predict(statesT);
+      const loss = tf.losses.meanSquaredError(targetT, pred);
+      lossResult = loss.dataSync()[0];
+      return loss;
+    });
+    targetT.dispose();
+    statesT.dispose();
+    return lossResult;
+  });
+
+  states.dispose(); nextStates.dispose(); currentQs.dispose(); nextQs.dispose();
+  lastLoss = lossVal;
+  trainCount++;
+}
+
+// ── WORLD STATE ───────────────────────────────────────────────────────────
+let norns, selectedNornIdx, foods, poisons, tick, paused, teachMode, teachTarget, history;
+let foodEaten, poisonTouched;
+
+// Convenience getter — always returns the currently selected norn
+function getNorn() { return norns[selectedNornIdx]; }
+
+// Alias used throughout legacy code — always refers to selected norn
+Object.defineProperty(window, 'norn', { get: getNorn, configurable: true });
+
+let nornCounter = 0;
+function makeNorn(name) {
+  nornCounter++;
+  return {
+    id: nornCounter,
+    name: name || `Norn-${nornCounter}`,
+    x: canvas.width  / 2 + (Math.random()-0.5)*100,
+    y: canvas.height / 2 + (Math.random()-0.5)*100,
+    vx: 0, vy: 0,
+    hp: 100,
+    drives: [20, 0, 0, 0, 20, 20], // Hunger, Tiredness, Sleepiness, Fear, Boredom, NeedPleasure
+    action: 6,
+    actionProbs: new Array(N_ACTIONS).fill(1/N_ACTIONS),
+    senses: new Array(N_SENSORS).fill(0),
+    concept: new Array(N_CONCEPT).fill(0),
+    sleeping: false,
+    sleepTimer: 0,
+    dead: false,
+    epsilon: 0.3,
+  };
+}
+
+// ── LOG ────────────────────────────────────────────────────────────────────
+const logLines = [];
+function addLog(type, msg) {
+  const el = document.getElementById('log-output');
+  logLines.push({ type, msg, t: tick });
+  if (logLines.length > 200) logLines.shift();
+  el.innerHTML = logLines.slice(-80).map(l =>
+    `<div><span class="log-tick">[${String(l.t).padStart(5,'0')}]</span> <span class="log-${l.type}">${l.msg}</span></div>`
+  ).join('');
+  el.scrollTop = el.scrollHeight;
+}
+function logClear() {
+  document.getElementById('log-output').innerHTML = '';
+  logLines.length = 0;
+}
+
+function resetWorld() {
+  tick = 0;
+  paused = false;
+  teachMode = false;
+  teachTarget = -1;
+  history = [];
+  foodEaten = 0;
+  poisonTouched = 0;
+  norns = [makeNorn('Eve')];
+  selectedNornIdx = 0;
+  foods = [];
+  poisons = [];
+  updatePlayBtn();
+  logClear();
+  refreshCreatureSelect();
+  addLog('event','WORLD: Reset. Norn "Eve" spawned.');
+}
+resetWorld();
+
+// ── OBJECT SPAWNING ────────────────────────────────────────────────────────
+function spawnFood() {
+  const m = 20;
+  foods.push({
+    x: m + Math.random() * (canvas.width  - 2*m),
+    y: m + Math.random() * (canvas.height - 2*m),
+    r: 8,
+  });
+}
+function spawnPoison() {
+  const m = 20;
+  poisons.push({
+    x: m + Math.random() * (canvas.width  - 2*m),
+    y: m + Math.random() * (canvas.height - 2*m),
+    r: 8,
+  });
+}
+for (let i = 0; i < 5; i++) spawnFood();
+for (let i = 0; i < 2; i++) spawnPoison();
+
+// ── SENSING ────────────────────────────────────────────────────────────────
+function updateSenses() {
+  const cw = canvas.width, ch = canvas.height;
+  // nearest food
+  let fdist = 1, fdir = 0;
+  let minFd = Infinity;
+  for (const f of foods) {
+    const dx = f.x - norn.x, dy = f.y - norn.y;
+    const d = Math.sqrt(dx*dx+dy*dy);
+    if (d < minFd) { minFd = d; fdir = Math.atan2(dy,dx)/Math.PI; }
+  }
+  fdist = foods.length ? Math.max(0, 1 - minFd / Math.max(cw,ch)) : 0;
+
+  // nearest poison
+  let pdist = 0, pdir = 0;
+  let minPd = Infinity;
+  for (const p of poisons) {
+    const dx = p.x - norn.x, dy = p.y - norn.y;
+    const d = Math.sqrt(dx*dx+dy*dy);
+    if (d < minPd) { minPd = d; pdir = Math.atan2(dy,dx)/Math.PI; }
+  }
+  pdist = poisons.length ? Math.max(0, 1 - minPd / Math.max(cw,ch)) : 0;
+
+  // walls
+  const wallL = 1 - Math.min(norn.x, 80) / 80;
+  const wallR = 1 - Math.min(cw - norn.x, 80) / 80;
+  const wallT = 1 - Math.min(norn.y, 80) / 80;
+  const wallB = 1 - Math.min(ch - norn.y, 80) / 80;
+
+  // touching food/poison
+  let touching = 0;
+  for (const f of foods) {
+    const d = Math.hypot(f.x - norn.x, f.y - norn.y);
+    if (d < 14) { touching = 1; break; }
+  }
+  if (!touching) for (const p of poisons) {
+    const d = Math.hypot(p.x - norn.x, p.y - norn.y);
+    if (d < 14) { touching = -0.5; break; }
+  }
+
+  norn.senses = [fdist, fdir, pdist, pdir, wallL, wallR, wallT, wallB, touching];
+
+  // concept lobe — simple non-linear mix
+  for (let i = 0; i < N_CONCEPT; i++) {
+    const a = norn.senses[i % N_SENSORS];
+    const b = norn.drives[i % DRIVE_NAMES.length] / 100;
+    norn.concept[i] = Math.tanh(a * 2 + b * (i % 3 === 0 ? 1 : -0.5));
+  }
+}
+
+// ── STATE VECTOR ───────────────────────────────────────────────────────────
+function getStateVec() {
+  return [
+    ...norn.senses,
+    ...norn.concept,
+    ...norn.drives.map(d => d / 100),
+  ];
+}
+
+// ── EPSILON-GREEDY ACTION ─────────────────────────────────────────────────
+async function chooseAction(stateVec) {
+  if (Math.random() < norn.epsilon) {
+    return Math.floor(Math.random() * N_ACTIONS);
+  }
+  const t = tf.tensor2d([stateVec]);
+  const q = model.predict(t);
+  const arr = await q.array();
+  t.dispose(); q.dispose();
+  const qvals = arr[0];
+  // softmax for probs
+  const maxQ = Math.max(...qvals);
+  const exps = qvals.map(v => Math.exp(v - maxQ));
+  const sumE = exps.reduce((a,b)=>a+b,0);
+  norn.actionProbs = exps.map(e => e / sumE);
+  return qvals.indexOf(Math.max(...qvals));
+}
+
+// ── APPLY ACTION ───────────────────────────────────────────────────────────
+const SPEED = 3;
+function applyAction(action) {
+  if (norn.dead) return;
+  if (norn.sleeping) {
+    if (action !== 5) return; // locked in sleep
+  }
+  const cw = canvas.width, ch = canvas.height;
+  switch (action) {
+    case 0: norn.vx = -SPEED; norn.vy = 0;  break;
+    case 1: norn.vx =  SPEED; norn.vy = 0;  break;
+    case 2: norn.vx = 0; norn.vy = -SPEED;  break;
+    case 3: norn.vx = 0; norn.vy =  SPEED;  break;
+    case 4: // Eat — move towards nearest food
+      { let best = null, bd = Infinity;
+        for (const f of foods) {
+          const d = Math.hypot(f.x-norn.x, f.y-norn.y);
+          if (d < bd) { bd = d; best = f; }
+        }
+        if (best) {
+          const dx = best.x - norn.x, dy = best.y - norn.y;
+          const d = Math.hypot(dx, dy);
+          norn.vx = (dx/d)*SPEED; norn.vy = (dy/d)*SPEED;
+        } else { norn.vx *= 0.5; norn.vy *= 0.5; }
+      }
+      break;
+    case 5: // Sleep
+      norn.sleeping = true;
+      norn.vx = 0; norn.vy = 0;
+      norn.sleepTimer = 30 + Math.floor(norn.drives[1] / 10);
+      break;
+    case 6: // Wander
+      norn.vx += (Math.random()-0.5)*2;
+      norn.vy += (Math.random()-0.5)*2;
+      norn.vx = Math.max(-SPEED, Math.min(SPEED, norn.vx));
+      norn.vy = Math.max(-SPEED, Math.min(SPEED, norn.vy));
+      break;
+    case 7: // Say need — reduce NeedPleasure
+      norn.drives[5] = Math.max(0, norn.drives[5] - 20);
+      norn.vx *= 0.8; norn.vy *= 0.8;
+      break;
+  }
+}
+
+// ── PHYSICS & DRIVES ───────────────────────────────────────────────────────
+function physicsStep() {
+  if (norn.dead) return;
+  const cw = canvas.width, ch = canvas.height;
+  const R = 10;
+
+  norn.x += norn.vx;
+  norn.y += norn.vy;
+  norn.x = Math.max(R, Math.min(cw-R, norn.x));
+  norn.y = Math.max(R, Math.min(ch-R, norn.y));
+  norn.vx *= 0.9; norn.vy *= 0.9;
+
+  // Sleep handling
+  if (norn.sleeping) {
+    norn.sleepTimer--;
+    norn.drives[1] = Math.max(0, norn.drives[1] - 3); // Tiredness
+    norn.drives[2] = Math.max(0, norn.drives[2] - 5); // Sleepiness
+    if (norn.sleepTimer <= 0) {
+      norn.sleeping = false;
+      addLog('action', `CAOS: ASLP 0 — norn woke up`);
+    }
+    return;
+  }
+
+  // Drive updates
+  const speed = Math.hypot(norn.vx, norn.vy);
+  norn.drives[0] = Math.min(100, norn.drives[0] + settings.hungerRate * 0.05);     // Hunger
+  norn.drives[1] = Math.min(100, norn.drives[1] + speed * settings.tiredRate * 0.02); // Tiredness
+  norn.drives[2] = Math.min(100, norn.drives[2] + (norn.drives[1] / 100) * 0.4);  // Sleepiness
+  norn.drives[4] = Math.min(100, norn.drives[4] + settings.boredRate * 0.04);     // Boredom
+  norn.drives[5] = Math.min(100, norn.drives[5] + 0.03);                           // NeedPleasure
+
+  // Fear decay
+  norn.drives[3] = Math.max(0, norn.drives[3] - 0.5);
+
+  // Near poison → fear rises
+  for (const p of poisons) {
+    const d = Math.hypot(p.x-norn.x, p.y-norn.y);
+    if (d < 60) norn.drives[3] = Math.min(100, norn.drives[3] + (1 - d/60)*2);
+  }
+
+  // Eat food collision
+  let ateTick = false;
+  for (let i = foods.length-1; i >= 0; i--) {
+    const d = Math.hypot(foods[i].x-norn.x, foods[i].y-norn.y);
+    if (d < 14) {
+      foods.splice(i, 1);
+      norn.drives[0] = Math.max(0, norn.drives[0] - 40); // Hunger
+      norn.drives[4] = Math.max(0, norn.drives[4] - 20); // Boredom
+      norn.drives[5] = Math.max(0, norn.drives[5] - 15); // NeedPleasure
+      norn.hp = Math.min(100, norn.hp + 5);
+      foodEaten++;
+      ateTick = true;
+      addLog('reward', `CAOS: STIM WRIT FROM 6 255 — hunger--`);
+    }
+  }
+  norn.ateTick = ateTick;
+
+  // Poison collision
+  let poisonedTick = false;
+  for (const p of poisons) {
+    const d = Math.hypot(p.x-norn.x, p.y-norn.y);
+    if (d < 14) {
+      norn.hp = Math.max(0, norn.hp - 3);
+      norn.drives[0] = Math.min(100, norn.drives[0] + 10);
+      norn.drives[3] = Math.min(100, norn.drives[3] + 30);
+      poisonTouched++;
+      poisonedTick = true;
+      addLog('punish', `CAOS: CHEM 254 100 — toxin injected`);
+    }
+  }
+  norn.poisonedTick = poisonedTick;
+
+  // HP decay from hunger
+  if (norn.drives[0] > 90) norn.hp = Math.max(0, norn.hp - 0.3);
+  if (norn.hp <= 0) {
+    norn.dead = true;
+    addLog('death', `CAOS: DEAD — norn has died at tick ${tick}`);
+  }
+
+  // Wander reduces boredom
+  if (speed > 1) norn.drives[4] = Math.max(0, norn.drives[4] - 0.3);
+
+  // Auto-sleep if Sleepiness ≥ 85
+  if (norn.drives[2] >= 85 && !norn.sleeping) {
+    norn.action = 5;
+    applyAction(5);
+    addLog('action', `CAOS: ASLP 1 — sleepiness threshold reached`);
+  }
+}
+
+// ── REWARD SIGNAL ──────────────────────────────────────────────────────────
+function computeReward(prevDrives) {
+  let r = 0;
+
+  // Drive delta: reward when drives go down, penalise when they rise
+  for (let i = 0; i < DRIVE_NAMES.length; i++) {
+    r -= (norn.drives[i] - prevDrives[i]) * 0.01;
+  }
+
+  // Explicit eating reward — scaled by how hungry the norn was (hungrier = more rewarding)
+  if (norn.ateTick) {
+    const hungerBonus = 0.5 + (prevDrives[0] / 100) * 1.0; // 0.5–1.5
+    r += hungerBonus;
+  }
+
+  // Explicit poison penalty
+  if (norn.poisonedTick) r -= 1.5;
+
+  // Death penalty
+  if (norn.dead) r -= 10;
+
+  return r;
+}
+
+// ── TICK ───────────────────────────────────────────────────────────────────
+async function doTick() {
+  // Tick every living norn
+  for (let ni = 0; ni < norns.length; ni++) {
+    const n = norns[ni];
+    if (n.dead) continue;
+
+    // Temporarily point selected to this norn for helpers that use `norn`
+    const savedIdx = selectedNornIdx;
+    selectedNornIdx = ni;
+
+    const prevState  = getStateVec();
+    const prevDrives = [...n.drives];
+
+    updateSenses();
+    n.action = await chooseAction(getStateVec());
+    applyAction(n.action);
+    physicsStep();
+
+    const nextState = getStateVec();
+    const reward    = computeReward(prevDrives);
+    remember(prevState, n.action, reward, nextState, n.dead);
+    n.epsilon = Math.max(0.05, n.epsilon * 0.9995);
+
+    selectedNornIdx = savedIdx;
+  }
+
+  // Spawn objects
+  if (settings.autoSpawnFood   && tick % settings.foodRate   === 0) spawnFood();
+  if (settings.autoSpawnPoison && tick % settings.poisonRate === 0) spawnPoison();
+
+  // CAGE age
+  const cage = Math.min(6, Math.floor(tick / 200));
+
+  // Log action occasionally (selected norn only)
+  if (tick % 10 === 0 && norns.length > 0 && getNorn()) {
+    const n = getNorn();
+    addLog('action', `CAOS: [${n.name}] DOIF driv ${n.action} — ${ACTION_NAMES[n.action]}`);
+  }
+
+  // History for step-back (selected norn snapshot)
+  history.push({
+    norns: JSON.parse(JSON.stringify(norns)),
+    foods: JSON.parse(JSON.stringify(foods)),
+    poisons: JSON.parse(JSON.stringify(poisons)),
+    tick, selectedNornIdx,
+    foodEaten, poisonTouched,
+  });
+  if (history.length > 20) history.shift();
+
+  tick++;
+
+  // Auto-train
+  if (settings.autoTrain > 0 && tick % settings.autoTrain === 0) {
+    await trainBatch();
+    addLog('reward', `AUTO-TRAIN: batch at tick ${tick} — loss ${lastLoss !== null ? lastLoss.toFixed(4) : '?'}`);
+  }
+
+  draw();
+  updateUI();
+}
+
+// ── STEP BACK ──────────────────────────────────────────────────────────────
+function stepBack() {
+  if (history.length < 2) return;
+  history.pop();
+  const s = history[history.length-1];
+  norns          = JSON.parse(JSON.stringify(s.norns));
+  foods          = JSON.parse(JSON.stringify(s.foods));
+  poisons        = JSON.parse(JSON.stringify(s.poisons));
+  tick           = s.tick;
+  selectedNornIdx = s.selectedNornIdx;
+  foodEaten      = s.foodEaten;
+  poisonTouched  = s.poisonTouched;
+  refreshCreatureSelect();
+  draw();
+  updateUI();
+}
+
+// ── DRAWING ────────────────────────────────────────────────────────────────
+function drawGrid() {
+  ctx.strokeStyle = '#0d1520';
+  ctx.lineWidth = 1;
+  const step = 40;
+  for (let x = 0; x < canvas.width; x += step) {
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke();
+  }
+  for (let y = 0; y < canvas.height; y += step) {
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke();
+  }
+}
+
+function drawFood(f) {
+  ctx.beginPath();
+  ctx.arc(f.x, f.y, f.r, 0, Math.PI*2);
+  ctx.fillStyle = '#2d5a27';
+  ctx.fill();
+  ctx.strokeStyle = '#7fff00';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // dot
+  ctx.beginPath(); ctx.arc(f.x, f.y, 3, 0, Math.PI*2);
+  ctx.fillStyle = '#7fff00'; ctx.fill();
+}
+
+function drawPoison(p) {
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.strokeStyle = '#ff4757'; ctx.lineWidth = 1.5;
+  ctx.fillStyle = '#3a0a0a';
+  ctx.beginPath(); ctx.arc(0, 0, p.r, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  // skull cross
+  ctx.strokeStyle = '#ff4757'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(-4,-4); ctx.lineTo(4,4); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(4,-4); ctx.lineTo(-4,4); ctx.stroke();
+  ctx.restore();
+}
+
+function getNornColor(n) {
+  if (n.dead) return '#333';
+  if (n.sleeping) return '#001a30';
+  const d = n.drives;
+  const maxDrive = Math.max(...d);
+  const idx = d.indexOf(maxDrive);
+  if (maxDrive < 20) return '#00e5ff';
+  return DRIVE_COLORS[idx];
+}
+
+function drawNorn(n, isSelected) {
+  const { x, y } = n;
+
+  // Selection ring
+  if (isSelected) {
+    ctx.beginPath(); ctx.arc(x, y, 17, 0, Math.PI*2);
+    ctx.strokeStyle = 'rgba(0,229,255,0.5)'; ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  // Shadow
+  ctx.beginPath();
+  ctx.ellipse(x, y+12, 14, 5, 0, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fill();
+
+  // Body
+  const r = 12;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2);
+  ctx.fillStyle = getNornColor(n);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Eyes
+  const eyeOff = n.sleeping ? 2 : 0;
+  ctx.fillStyle = n.dead ? '#555' : '#fff';
+  ctx.beginPath(); ctx.arc(x-4, y-4+eyeOff, 3, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x+4, y-4+eyeOff, 3, 0, Math.PI*2); ctx.fill();
+  if (!n.dead && !n.sleeping) {
+    ctx.fillStyle = '#000';
+    ctx.beginPath(); ctx.arc(x-3.5, y-4, 1.5, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x+4.5, y-4, 1.5, 0, Math.PI*2); ctx.fill();
+  }
+  if (n.sleeping) {
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x-5, y-4); ctx.lineTo(x-2, y-4);
+    ctx.moveTo(x+2, y-4); ctx.lineTo(x+6, y-4);
+    ctx.stroke();
+  }
+
+  // Zzz if sleeping
+  if (n.sleeping) {
+    ctx.fillStyle = '#00bfff'; ctx.font = '10px monospace';
+    ctx.fillText('z', x+10, y-14);
+    ctx.fillText('Z', x+15, y-22);
+  }
+
+  // Name label (non-selected norns get a smaller dimmer name)
+  if (!isSelected && !n.dead) {
+    ctx.fillStyle = 'rgba(100,150,180,0.6)';
+    ctx.font = '8px monospace';
+    ctx.fillText(n.name, x - ctx.measureText(n.name).width/2, y + r + 10);
+    return; // skip bars for non-selected norns
+  }
+
+  // HP bar above
+  const barW = 40, barH = 5;
+  const bx = x - barW/2, by = y - r - 18;
+  ctx.fillStyle = '#0d1520';
+  ctx.fillRect(bx, by, barW, barH);
+  ctx.fillStyle = n.hp > 50 ? '#7fff00' : n.hp > 25 ? '#ffa502' : '#ff4757';
+  ctx.fillRect(bx, by, barW * (n.hp/100), barH);
+  ctx.strokeStyle = '#1e2a38'; ctx.lineWidth = 0.5;
+  ctx.strokeRect(bx, by, barW, barH);
+
+  // Drive bar
+  const maxD = Math.max(...n.drives);
+  const maxIdx = n.drives.indexOf(maxD);
+  const by2 = by - 9;
+  ctx.fillStyle = '#0d1520';
+  ctx.fillRect(bx, by2, barW, 5);
+  ctx.fillStyle = DRIVE_COLORS[maxIdx];
+  ctx.fillRect(bx, by2, barW * (maxD/100), 5);
+  ctx.strokeStyle = '#1e2a38'; ctx.lineWidth = 0.5;
+  ctx.strokeRect(bx, by2, barW, 5);
+  ctx.fillStyle = DRIVE_COLORS[maxIdx]; ctx.font = '8px monospace';
+  ctx.fillText(DRIVE_NAMES[maxIdx].slice(0,4).toUpperCase(), bx, by2-2);
+
+  // Name + action label
+  if (!n.dead) {
+    ctx.fillStyle = 'rgba(0,229,255,0.7)';
+    ctx.font = '9px monospace';
+    const label = `${n.name}: ${ACTION_NAMES[n.action]}`;
+    ctx.fillText(label, x - ctx.measureText(label).width/2, y + r + 14);
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawGrid();
+  for (const f of foods)   drawFood(f);
+  for (const p of poisons) drawPoison(p);
+  // Draw unselected norns first, selected on top
+  norns.forEach((n, i) => { if (i !== selectedNornIdx) drawNorn(n, false); });
+  if (norns.length > 0) drawNorn(norns[selectedNornIdx], true);
+}
+
+// ── UI INIT ────────────────────────────────────────────────────────────────
+function initDriveGrid() {
+  const g = document.getElementById('drive-grid');
+  g.innerHTML = '';
+  DRIVE_NAMES.forEach((name, i) => {
+    g.innerHTML += `
+      <div class="drive-item">
+        <div class="drive-label">${name.slice(0,6)}</div>
+        <div class="drive-track">
+          <div class="drive-fill" id="df-${i}" style="height:0%;background:${DRIVE_COLORS[i]}"></div>
+        </div>
+        <div class="drive-val" id="dv-${i}">0</div>
+      </div>`;
+  });
+}
+
+function initSenseRows() {
+  const c = document.getElementById('sense-rows');
+  c.innerHTML = '';
+  SENSE_NAMES.forEach((name, i) => {
+    c.innerHTML += `
+      <div class="sense-row">
+        <span class="sense-name">${name}</span>
+        <div class="sense-bar-wrap"><div class="sense-bar" id="sb-${i}" style="width:0%"></div></div>
+        <span class="sense-val" id="sv-${i}">0.00</span>
+      </div>`;
+  });
+}
+
+function initConceptGrid() {
+  const g = document.getElementById('concept-grid');
+  g.innerHTML = '';
+  for (let i = 0; i < N_CONCEPT; i++) {
+    g.innerHTML += `<div class="concept-cell"><div class="concept-fill" id="cc-${i}" style="height:0%"></div></div>`;
+  }
+}
+
+function initActionGrid(containerId, teachable) {
+  const g = document.getElementById(containerId);
+  g.innerHTML = '';
+  ACTION_NAMES.forEach((name, i) => {
+    g.innerHTML += `
+      <div class="action-card" id="${containerId}-card-${i}" ${teachable ? `onclick="selectTeach(${i})"` : ''}>
+        <div class="action-name">${name}</div>
+        <div class="action-prob-bar"><div class="action-prob-fill" id="${containerId}-pb-${i}" style="width:0%"></div></div>
+        <div class="action-prob-val" id="${containerId}-pv-${i}">0%</div>
+      </div>`;
+  });
+}
+
+// ── SELECT TEACH ───────────────────────────────────────────────────────────
+function selectTeach(i) {
+  teachTarget = i;
+  document.querySelectorAll('#teach-grid .action-card').forEach((c,j) => {
+    c.classList.toggle('selected-teach', j === i);
+  });
+  addLog('event', `TEACH: Target action set → ${ACTION_NAMES[i]}`);
+}
+
+// ── UI UPDATE ──────────────────────────────────────────────────────────────
+function updateUI() {
+  const n = getNorn();
+  if (!n) return; // safety guard
+  // Drives
+  DRIVE_NAMES.forEach((_, i) => {
+    const v = Math.round(norn.drives[i]);
+    document.getElementById(`df-${i}`).style.height = v + '%';
+    document.getElementById(`dv-${i}`).textContent = v;
+  });
+
+  // Senses
+  SENSE_NAMES.forEach((_, i) => {
+    const v = norn.senses[i] || 0;
+    const pct = Math.min(100, Math.abs(v) * 100);
+    document.getElementById(`sb-${i}`).style.width  = pct + '%';
+    document.getElementById(`sv-${i}`).textContent = v.toFixed(2);
+  });
+
+  // Concept
+  for (let i = 0; i < N_CONCEPT; i++) {
+    const v = norn.concept[i] || 0;
+    const h = Math.min(100, Math.abs(v) * 100);
+    const el = document.getElementById(`cc-${i}`);
+    el.style.height = h + '%';
+    el.style.background = v > 0 ? '#00e5ff' : '#ff4757';
+  }
+
+  // Action probs — both grids
+  ACTION_NAMES.forEach((_, i) => {
+    const p = norn.actionProbs[i] || 0;
+    const pct = (p * 100).toFixed(1) + '%';
+    ['action-grid', 'teach-grid'].forEach(gid => {
+      const pb = document.getElementById(`${gid}-pb-${i}`);
+      const pv = document.getElementById(`${gid}-pv-${i}`);
+      const card = document.getElementById(`${gid}-card-${i}`);
+      if (pb) pb.style.width = (p*100) + '%';
+      if (pv) pv.textContent = pct;
+      if (card) card.classList.toggle('active-action', i === norn.action);
+    });
+  });
+
+  // Status bar
+  const cage = Math.min(6, Math.floor(tick / 200));
+  document.getElementById('st-tick').textContent    = tick;
+  document.getElementById('st-eaten').textContent   = foodEaten;
+  document.getElementById('st-poisoned').textContent = poisonTouched;
+  document.getElementById('st-trained').textContent = trainCount;
+  document.getElementById('st-loss').textContent    = lastLoss !== null ? lastLoss.toFixed(4) : '—';
+  document.getElementById('st-cage').textContent    = AGES[cage];
+  document.getElementById('st-hp').textContent      = Math.round(norn.hp);
+}
+
+// ── MAIN LOOP ──────────────────────────────────────────────────────────────
+let loopId = null;
+let lastTick = 0;
+
+function updatePlayBtn() {
+  const btn = document.getElementById('btn-play');
+  btn.textContent = paused ? '▶ PLAY' : '⏸ PAUSE';
+  btn.classList.toggle('active', !paused);
+}
+
+async function loop(now) {
+  if (!paused) {
+    const interval = 1000 / settings.speed;
+    if (now - lastTick >= interval) {
+      lastTick = now;
+      await doTick();
+    }
+  }
+  loopId = requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ── CONTROLS ────────────────────────────────────────────────────────────────
+document.getElementById('btn-play').onclick = () => {
+  paused = !paused;
+  updatePlayBtn();
+};
+document.getElementById('btn-step').onclick = async () => {
+  paused = true;
+  updatePlayBtn();
+  await doTick();
+};
+document.getElementById('btn-stepback').onclick = () => {
+  paused = true;
+  updatePlayBtn();
+  stepBack();
+};
+document.getElementById('btn-teach-mode').onclick = () => {
+  teachMode = !teachMode;
+  document.getElementById('btn-teach-mode').classList.toggle('active', teachMode);
+  // Pause only if setting says so
+  if (teachMode && settings.pauseOnTeach) {
+    paused = true;
+    updatePlayBtn();
+  }
+  // Switch to TEACH tab
+  if (teachMode) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    document.querySelector('.tab[data-tab="teach"]').classList.add('active');
+    document.getElementById('pane-teach').classList.add('active');
+  }
+  addLog('event', `TEACH MODE: ${teachMode ? 'ON' : 'OFF'}`);
+};
+document.getElementById('btn-add-food').onclick = () => {
+  spawnFood(); draw();
+  addLog('event', 'NEW: SIMP food — food injected');
+};
+
+let placeFoodMode = false;
+let placePoisonMode = false;
+
+document.getElementById('btn-place-food').onclick = () => {
+  placeFoodMode = !placeFoodMode;
+  if (placeFoodMode) placePoisonMode = false;
+  document.getElementById('btn-place-food').classList.toggle('active', placeFoodMode);
+  document.getElementById('btn-place-poison').classList.remove('active');
+  canvas.classList.toggle('place-mode', placeFoodMode || placePoisonMode);
+  addLog('event', `PLACE MODE: ${placeFoodMode ? 'FOOD — click world to place' : 'OFF'}`);
+};
+
+document.getElementById('btn-place-poison').onclick = () => {
+  placePoisonMode = !placePoisonMode;
+  if (placePoisonMode) placeFoodMode = false;
+  document.getElementById('btn-place-poison').classList.toggle('active', placePoisonMode);
+  document.getElementById('btn-place-food').classList.remove('active');
+  canvas.classList.toggle('place-mode', placeFoodMode || placePoisonMode);
+  addLog('event', `PLACE MODE: ${placePoisonMode ? 'POISON — click world to place' : 'OFF'}`);
+};
+
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+
+  // Place mode: food or poison
+  if (placeFoodMode || placePoisonMode) {
+    if (placeFoodMode) {
+      foods.push({ x, y, r: 8 });
+      addLog('event', `NEW: SIMP food — placed at (${Math.round(x)}, ${Math.round(y)})`);
+    } else {
+      poisons.push({ x, y, r: 8 });
+      addLog('punish', `NEW: SIMP bahrb — placed at (${Math.round(x)}, ${Math.round(y)})`);
+    }
+    draw();
+    return;
+  }
+
+  // Click on a norn to select it
+  for (let i = 0; i < norns.length; i++) {
+    const n = norns[i];
+    if (Math.hypot(n.x - x, n.y - y) < 16) {
+      selectedNornIdx = i;
+      refreshCreatureSelect();
+      draw();
+      updateUI();
+      addLog('event', `SELECT: clicked → ${n.name}`);
+      return;
+    }
+  }
+});
+document.getElementById('btn-add-poison').onclick = () => {
+  spawnPoison(); draw();
+  addLog('event', 'NEW: SIMP bahrb — poison injected');
+};
+document.getElementById('btn-train').onclick = async () => {
+  await trainBatch();
+  updateUI();
+  addLog('reward', `TRAIN: backprop batch — loss ${lastLoss !== null ? lastLoss.toFixed(4) : '?'}`);
+};
+document.getElementById('btn-reset').onclick = () => {
+  resetWorld();
+  for (let i = 0; i < 5; i++) spawnFood();
+  for (let i = 0; i < 2; i++) spawnPoison();
+  draw();
+  updateUI();
+};
+
+// Reward / Punish
+document.getElementById('btn-reward').onclick = async () => {
+  if (teachTarget < 0) { addLog('punish','TEACH: No target action selected.'); return; }
+  const s = getStateVec();
+  remember(s, teachTarget, +2, s, false);
+  await trainBatch();
+  addLog('reward', `TEACH: REWARD → ${ACTION_NAMES[teachTarget]} (training injected)`);
+};
+document.getElementById('btn-punish').onclick = async () => {
+  if (teachTarget < 0) { addLog('punish','TEACH: No target action selected.'); return; }
+  const s = getStateVec();
+  remember(s, teachTarget, -2, s, false);
+  await trainBatch();
+  addLog('punish', `TEACH: PUNISH → ${ACTION_NAMES[teachTarget]} (training injected)`);
+};
+
+// Settings
+function bindRange(id, valId, key, transform) {
+  const el = document.getElementById(id);
+  const vEl = document.getElementById(valId);
+  el.addEventListener('input', () => {
+    const v = parseFloat(el.value);
+    const t = transform ? transform(v) : v;
+    settings[key] = t;
+    vEl.textContent = typeof t === 'number' && !Number.isInteger(t) ? t.toFixed(3) : t;
+  });
+}
+bindRange('set-speed', 'val-speed', 'speed');
+bindRange('set-food-rate', 'val-food-rate', 'foodRate', v => {
+  document.getElementById('val-food-rate').textContent = `every ${Math.round(v)}t`;
+  return Math.round(v);
+});
+bindRange('set-poison-rate', 'val-poison-rate', 'poisonRate', v => {
+  document.getElementById('val-poison-rate').textContent = `every ${Math.round(v)}t`;
+  return Math.round(v);
+});
+bindRange('set-hunger-rate', 'val-hunger-rate', 'hungerRate');
+bindRange('set-tired-rate', 'val-tired-rate', 'tiredRate');
+bindRange('set-bored-rate', 'val-bored-rate', 'boredRate');
+bindRange('set-lr', 'val-lr', 'lr', v => +(v/1000).toFixed(4));
+bindRange('set-mem', 'val-mem', 'memSize');
+bindRange('set-gamma', 'val-gamma', 'gamma', v => +(v/100).toFixed(2));
+document.getElementById('set-autotrain').addEventListener('input', function() {
+  const v = parseInt(this.value);
+  settings.autoTrain = v;
+  document.getElementById('val-autotrain').textContent = v === 0 ? 'OFF' : `every ${v}t`;
+});
+document.getElementById('set-autospawn-food').addEventListener('change', function() {
+  settings.autoSpawnFood = this.checked;
+});
+document.getElementById('set-autospawn-poison').addEventListener('change', function() {
+  settings.autoSpawnPoison = this.checked;
+});
+document.getElementById('set-pause-on-teach').addEventListener('change', function() {
+  settings.pauseOnTeach = this.checked;
+});
+
+// ── CREATURE MANAGEMENT ────────────────────────────────────────────────────
+function refreshCreatureSelect() {
+  const sel = document.getElementById('set-creature-select');
+  sel.innerHTML = norns.map((n, i) =>
+    `<option value="${i}" ${i === selectedNornIdx ? 'selected' : ''}>${n.name}${n.dead ? ' [DEAD]' : ''}</option>`
+  ).join('');
+}
+
+document.getElementById('set-creature-select').addEventListener('change', function() {
+  selectedNornIdx = parseInt(this.value);
+  draw();
+  updateUI();
+  addLog('event', `SELECT: creature → ${getNorn().name}`);
+});
+
+document.getElementById('btn-creature-add').onclick = () => {
+  const name = `Norn-${nornCounter + 1}`;
+  norns.push(makeNorn(name));
+  selectedNornIdx = norns.length - 1;
+  refreshCreatureSelect();
+  draw();
+  updateUI();
+  addLog('event', `NEW: CREA — "${name}" added`);
+};
+
+document.getElementById('btn-creature-remove').onclick = () => {
+  if (norns.length <= 1) { addLog('punish', 'REMOVE: cannot remove last creature'); return; }
+  const name = getNorn().name;
+  norns.splice(selectedNornIdx, 1);
+  selectedNornIdx = Math.max(0, Math.min(selectedNornIdx, norns.length - 1));
+  refreshCreatureSelect();
+  draw();
+  updateUI();
+  addLog('event', `KILL: TARG — "${name}" removed`);
+};
+
+document.getElementById('btn-creature-export').onclick = () => {
+  const n = getNorn();
+  const data = JSON.stringify({ version: 1, norn: n }, null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${n.name.replace(/\s+/g,'_')}.json`;
+  a.click();
+  addLog('event', `EXPORT: "${n.name}" → ${a.download}`);
+};
+
+document.getElementById('btn-creature-import').onclick = () => {
+  document.getElementById('creature-import-file').click();
+};
+document.getElementById('creature-import-file').addEventListener('change', function() {
+  const file = this.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      const imported = data.norn || data;
+      // Reassign a fresh id and keep the name
+      nornCounter++;
+      imported.id = nornCounter;
+      imported.name = imported.name || `Imported-${nornCounter}`;
+      norns.push(imported);
+      selectedNornIdx = norns.length - 1;
+      refreshCreatureSelect();
+      draw();
+      updateUI();
+      addLog('event', `IMPORT: "${imported.name}" loaded from file`);
+    } catch(err) {
+      addLog('punish', `IMPORT ERROR: ${err.message}`);
+    }
+  };
+  reader.readAsText(file);
+  this.value = ''; // allow re-importing same file
+});
+
+// ── TABS ────────────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('pane-' + tab.dataset.tab).classList.add('active');
+  });
+});
+
+// ── INIT ────────────────────────────────────────────────────────────────────
+initDriveGrid();
+initSenseRows();
+initConceptGrid();
+initActionGrid('action-grid', false);
+initActionGrid('teach-grid', true);
+refreshCreatureSelect();
+updateUI();
+draw();
+
+addLog('event', 'CAOS: WORLD INIT — Creatures Neural Demo v1.0');
+addLog('event', 'CAOS: NORN spawned — genome: tf-sequential-32-24-8');
+addLog('event', 'CAOS: ENUM 2 6 0 — food objects injected');
+</script>
+</body>
+</html>
