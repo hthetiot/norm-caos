@@ -1350,8 +1350,8 @@ function selectTeach(i) {
 // ── UI UPDATE ──────────────────────────────────────────────────────────────
 function updateUI() {
   const n = getNorn();
-  if (!n) return; // safety guard
-  // Drives
+  // Drives — only update if we have a selected norn
+  if (n) {
   DRIVE_NAMES.forEach((_, i) => {
     const v = Math.round(norn.drives[i]);
     document.getElementById(`df-${i}`).style.height = v + '%';
@@ -1388,18 +1388,19 @@ function updateUI() {
       if (card) card.classList.toggle('active-action', i === norn.action);
     });
   });
+  } // end if (n)
 
-  // Status bar
+  // Status bar — always updates even with no norns
   const cage = Math.min(6, Math.floor(tick / 200));
   document.getElementById('st-tick').textContent    = tick;
   document.getElementById('st-eaten').textContent   = foodEaten;
   document.getElementById('st-poisoned').textContent = poisonTouched;
   document.getElementById('st-trained').textContent = trainCount;
   document.getElementById('st-loss').textContent    = lastLoss !== null ? lastLoss.toFixed(4) : '—';
-  document.getElementById('st-cage').textContent    = AGES[cage];
-  document.getElementById('st-hp').textContent      = Math.round(n.glycogen);
+  document.getElementById('st-cage').textContent    = n ? AGES[cage] : '—';
+  document.getElementById('st-hp').textContent      = n ? Math.round(n.glycogen) : '—';
   const glc = document.getElementById('st-glucose');
-  if (glc) glc.textContent = Math.round(n.glucose);
+  if (glc) glc.textContent = n ? Math.round(n.glucose) : '—';
 }
 
 // ── MAIN LOOP ──────────────────────────────────────────────────────────────
@@ -1629,21 +1630,16 @@ document.getElementById('btn-creature-remove').onclick = () => {
   if (norns.length === 0) return;
   const name = getNorn().name;
   norns.splice(selectedNornIdx, 1);
-  // If world is now empty, spawn a replacement so we never have 0 norns
-  if (norns.length === 0) {
-    norns.push(makeNorn('Eve'));
-    addLog('event', `KILL: TARG — "${name}" removed — world empty, new Norn spawned`);
-  } else {
-    addLog('event', `KILL: TARG — "${name}" removed`);
-  }
   selectedNornIdx = Math.max(0, Math.min(selectedNornIdx, norns.length - 1));
   refreshCreatureSelect();
   draw();
   updateUI();
+  addLog('event', `KILL: TARG — "${name}" removed`);
 };
 
 document.getElementById('btn-creature-export').onclick = () => {
   const n = getNorn();
+  if (!n) { addLog('punish', 'EXPORT: no creature selected'); return; }
   const data = JSON.stringify({ version: 1, norn: n }, null, 2);
   const blob = new Blob([data], { type: 'application/json' });
   const a = document.createElement('a');
