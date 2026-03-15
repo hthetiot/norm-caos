@@ -1548,6 +1548,9 @@ document.getElementById('btn-reward').onclick = async () => {
 };
 document.getElementById('btn-punish').onclick = async () => {
   if (teachTarget < 0) { addLog('punish','TEACH: Click an action card first to set the target action.'); return; }
+  const n = getNorn();
+  if (!n) return;
+  // C1 slap: inject Punishment, PainIncrease, FearIncrease
   n.punishment   = Math.min(100, n.punishment + 30);     // CHEM 50
   n.drives[3]    = Math.min(100, n.drives[3] + 20);      // Fear Increase (CHEM 26)
   n.reinforcement = Math.min(10, n.reinforcement + 3);    // CHEM 51
