@@ -720,10 +720,9 @@ function addLog(type, msg) {
   const el = document.getElementById('log-output');
   logLines.push({ type, msg, t: tick });
   if (logLines.length > 200) logLines.shift();
-  el.innerHTML = logLines.slice(-80).map(l =>
+  el.innerHTML = logLines.slice(-80).reverse().map(l =>
     `<div><span class="log-tick">[${String(l.t).padStart(5,'0')}]</span> <span class="log-${l.type}">${l.msg}</span></div>`
   ).join('');
-  el.scrollTop = el.scrollHeight;
 }
 function logClear() {
   document.getElementById('log-output').innerHTML = '';
